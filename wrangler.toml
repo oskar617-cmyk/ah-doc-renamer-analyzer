@@ -1,0 +1,12 @@
+name = "ah-doc-renamer-analyzer"
+main = "worker.js"
+compatibility_date = "2026-06-01"
+
+# Secrets are NOT stored in this file (it is committed to GitHub).
+# Set them in Cloudflare as SECRET type:
+#   Workers & Pages -> ah-doc-renamer-analyzer -> Settings -> Variables and Secrets
+#     GEMINI_API_KEY = <your Google AI Studio key>
+#     CORS_ORIGINS   = https://ah-doc-renamer.pages.dev,https://oskar617-cmyk.github.io
+#
+# Expected Worker URL after deploy:
+#   https://ah-doc-renamer-analyzer.oskar617.workers.dev
