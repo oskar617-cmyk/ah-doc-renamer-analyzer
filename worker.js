@@ -28,7 +28,7 @@
 
 // Bump on every release. Reported by the GET health check, and used in the zip
 // filename — this is the Worker's equivalent of a PWA's service-worker VERSION.
-const VERSION = 'v0.01';
+const VERSION = 'v0.02';
 
 // Locked to the model confirmed in chat. To upgrade to gemini-3.5-flash later
 // (paid tier, marginally stronger on messy title blocks) change ONLY this line.
@@ -51,9 +51,24 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(allowOrigin) });
     }
 
-    // Health check — open this URL in a browser to confirm the Worker is live
+    // Health check / self-test — open in a browser to confirm the Worker is live.
+    //   GET /            -> liveness + which secrets are wired (no secret values shown)
+    //   GET /?selftest=1 -> makes ONE real Gemini call to confirm the key works
     if (request.method === 'GET') {
-      return json({ ok: true, service: 'ah-doc-renamer-analyzer', version: VERSION, model: MODEL }, 200, allowOrigin);
+      const url = new URL(request.url);
+      if (url.searchParams.get('selftest') === '1') {
+        return await selftest(env, allowOrigin);
+      }
+      return json({
+        ok: true,
+        service: 'ah-doc-renamer-analyzer',
+        version: VERSION,
+        model: MODEL,
+        configured: {
+          geminiKey: !!env.GEMINI_API_KEY,
+          corsOrigins: !!env.CORS_ORIGINS,
+        },
+      }, 200, allowOrigin);
     }
 
     if (request.method !== 'POST') {
@@ -249,6 +264,44 @@ function extractText(data) {
   } catch {
     return '';
   }
+}
+
+// One-shot end-to-end check: confirms GEMINI_API_KEY actually works and the model
+// name is valid. Makes ONE tiny real Gemini call. Exposes no secret values.
+async function selftest(env, allowOrigin) {
+  const out = {
+    selftest: true,
+    version: VERSION,
+    model: MODEL,
+    configured: {
+      geminiKey: !!env.GEMINI_API_KEY,
+      corsOrigins: !!env.CORS_ORIGINS,
+    },
+    geminiOk: false,
+    detail: '',
+  };
+  if (!env.GEMINI_API_KEY) {
+    out.detail = 'GEMINI_API_KEY is not set';
+    return json(out, 200, allowOrigin);
+  }
+  try {
+    const ai = await classify({
+      apiKey: env.GEMINI_API_KEY,
+      filename: 'selftest.pdf',
+      text: 'Ground floor plan. Drawing number A-101. Revision C. Scale 1:100.',
+      image: null,
+      candidates: [
+        { docType: 'Architectural Plan', sectionNumber: 'A-100', note: 'floor plans, elevations, sections' },
+        { docType: 'Structural Plan', sectionNumber: 'S-100', note: 'footings, framing, steel' },
+      ],
+    });
+    out.geminiOk = true;
+    out.sample = { docType: ai.docType, confidence: ai.confidence };
+    out.detail = 'Gemini responded and the output parsed correctly.';
+  } catch (err) {
+    out.detail = 'Gemini call failed: ' + (err && err.message ? err.message : String(err));
+  }
+  return json(out, 200, allowOrigin);
 }
 
 // --- Helpers ----------------------------------------------------------------

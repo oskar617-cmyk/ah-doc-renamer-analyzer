@@ -12,7 +12,7 @@ Sibling of the AH Est Email Classifier Worker; same shape (Cloudflare Worker pro
 Gemini, native Workers format, auto-deployed from its GitHub repo).
 
 - **Repo:** `oskar617-cmyk/ah-doc-renamer-analyzer`
-- **Version:** `v0.01` (the `VERSION` constant at the top of `worker.js`; bump on every release)
+- **Version:** `v0.02` (the `VERSION` constant at the top of `worker.js`; bump on every release)
 - **Worker URL (after deploy):** `https://ah-doc-renamer-analyzer.oskar617.workers.dev`
 - **Model:** `gemini-3.1-flash-lite` (free tier, multimodal). Set in the `MODEL`
   constant at the top of `worker.js`.
@@ -74,8 +74,14 @@ no npm dependencies.
 
 ## Test
 
-- `GET` the Worker URL in a browser — should return
-  `{"ok":true,"service":"ah-doc-renamer-analyzer","version":"v0.01","model":"gemini-3.1-flash-lite"}`.
+- `GET` the Worker URL in a browser — liveness plus which secrets are wired (no
+  values shown):
+  `{"ok":true,"service":"ah-doc-renamer-analyzer","version":"v0.02","model":"gemini-3.1-flash-lite","configured":{"geminiKey":true,"corsOrigins":true}}`.
+- `GET /?selftest=1` — makes ONE real Gemini call and returns `"geminiOk":true` with
+  a sample classification when the key is valid and the model name is correct. This is
+  the quickest way to confirm the whole pipeline works. Note: it spends one (tiny)
+  Gemini request each time it is hit; remove the `selftest` block if you do not want a
+  public endpoint that calls Gemini.
 - `POST` a sample body (see Contract) — should return a valid response object whose
   `docType` is one of the supplied types or `""`.
 - From the PWA origin, a real classify call should succeed with no CORS error.
