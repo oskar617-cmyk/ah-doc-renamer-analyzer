@@ -14,7 +14,7 @@ Sibling of the AH Est Email Classifier Worker; same shape (Cloudflare Worker pro
 Gemini, native Workers format, auto-deployed from its GitHub repo).
 
 - **Repo:** `oskar617-cmyk/ah-doc-renamer-analyzer`
-- **Version:** `v0.03` (the `VERSION` constant at the top of `worker.js`; bump on every release)
+- **Version:** `v0.04` (the `VERSION` constant at the top of `worker.js`; bump on every release)
 - **Worker URL (after deploy):** `https://ah-doc-renamer-analyzer.oskar617.workers.dev`
 - **Model:** `gemini-3.1-flash-lite` (free tier, multimodal). Set in the `MODEL`
   constant at the top of `worker.js`.
@@ -90,7 +90,7 @@ no npm dependencies.
 
 - `GET` the Worker URL in a browser — liveness plus which secrets are wired (no
   values shown):
-  `{"ok":true,"service":"ah-doc-renamer-analyzer","version":"v0.03","model":"gemini-3.1-flash-lite","configured":{"geminiKey":true,"corsOrigins":true}}`.
+  `{"ok":true,"service":"ah-doc-renamer-analyzer","version":"v0.04","model":"gemini-3.1-flash-lite","configured":{"geminiKey":true,"corsOrigins":true}}`.
 - `GET /?selftest=1` — makes ONE real Gemini call and returns `"geminiOk":true` with
   a sample classification when the key is valid and the model name is correct. This is
   the quickest way to confirm the whole pipeline works. Note: it spends one (tiny)

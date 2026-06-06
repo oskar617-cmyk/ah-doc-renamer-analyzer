@@ -31,7 +31,7 @@
 
 // Bump on every release. Reported by the GET health check, and used in the zip
 // filename — this is the Worker's equivalent of a PWA's service-worker VERSION.
-const VERSION = 'v0.03';
+const VERSION = 'v0.04';
 
 // Locked to the model confirmed in chat. To upgrade to gemini-3.5-flash later
 // (paid tier, marginally stronger on messy title blocks) change ONLY this line.
@@ -248,9 +248,13 @@ function buildPrompt({ filename, text, candidates, examples = [] }) {
   const lines = [
     'You classify a single construction / architecture document for an Australian residential builder (Auzzie Homes).',
     '',
-    'Decide which ONE of the candidate document types below best matches THIS document, based on the document CONTENT — not the filename. The filename is often generic or wrong; treat it as a weak hint only.',
-    '',
-    'For drawings, the most reliable identifier is the TITLE BLOCK, usually in the bottom-right corner of the page. Read it carefully (from the page image when one is provided): it gives the sheet name, drawing number, discipline (Architectural / Structural / Hydraulic / Electrical / Civil / Landscape / Survey / etc.), revision, and often the project address and a short job code. Prefer the title block over everything else when present.',
+    'CORE PRINCIPLE — CONTENT FIRST, FILENAME IS ONLY A WEAK HINT:',
+    '- Decide the document type from its CONTENT, never from its filename when any content is readable.',
+    '- The single most important source is the drawing TITLE BLOCK (the drawing frame) — usually in the BOTTOM-RIGHT corner, or a vertical strip down the RIGHT-HAND side. It holds the sheet / drawing name, the discipline (Architectural / Structural / Hydraulic / Electrical / Civil / Landscape / Survey / etc.), the project address, and the drawing number. Read it FIRST and prefer it over everything else.',
+    '- The page image provided is HIGH RESOLUTION. Read the text inside the title block carefully from the image. The extracted "text" field is often sparse or empty (vector drawings frequently yield no extractable text), so the IMAGE is usually MORE important than the text.',
+    '- The filename is only a WEAK HINT and is OFTEN WRONG — external designers name files arbitrarily. NEVER classify on the filename alone when any content is readable.',
+    '- If the content (title block) and the filename CONFLICT, always trust the content and ignore the filename.',
+    '- Fall back to the filename ONLY when both the image and the text are completely unreadable or contain no useful information.',
     '',
     'Rules:',
     '- Choose exactly one docType value from the candidate list.',
