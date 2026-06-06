@@ -6,18 +6,20 @@ one of a list of candidate types, and to draft a short note describing it.
 
 It judges the **content** — extracted text plus the first-page image — not the
 filename. For drawings it is instructed to read the **title block** (bottom-right of
-the sheet) for the sheet name, drawing number, discipline and revision.
+the sheet) for the sheet name, drawing number, discipline, revision, and the project
+address / job code. It can also take **few-shot examples** of the user's past
+classifications to match their labelling conventions.
 
 Sibling of the AH Est Email Classifier Worker; same shape (Cloudflare Worker proxying
 Gemini, native Workers format, auto-deployed from its GitHub repo).
 
 - **Repo:** `oskar617-cmyk/ah-doc-renamer-analyzer`
-- **Version:** `v0.02` (the `VERSION` constant at the top of `worker.js`; bump on every release)
+- **Version:** `v0.03` (the `VERSION` constant at the top of `worker.js`; bump on every release)
 - **Worker URL (after deploy):** `https://ah-doc-renamer-analyzer.oskar617.workers.dev`
 - **Model:** `gemini-3.1-flash-lite` (free tier, multimodal). Set in the `MODEL`
   constant at the top of `worker.js`.
 
-## Contract (must match the PWA's `js/classify.js` — do not change)
+## Contract (kept in sync with the PWA's `js/classify.js`)
 
 **Request** — `POST`, `application/json`:
 
@@ -29,12 +31,17 @@ Gemini, native Workers format, auto-deployed from its GitHub repo).
   "docTypes": [
     { "docType": "Architectural Plan", "sectionNumber": "A-100", "note": "floor plans, elevations, sections" },
     { "docType": "Structural Plan", "sectionNumber": "S-100", "note": "footings, framing, steel" }
+  ],
+  "examples": [
+    { "snippet": "Ground floor plan A-101 …", "docType": "Architectural Plan" }
   ]
 }
 ```
 
 `image` may be `null`. `docTypes` may be empty (then the result is always "no match",
-but a `note` is still drafted).
+but a `note` is still drafted). `examples` is **optional** (may be empty or absent): a
+few-shot list of how the user labelled similar documents before, used to bias the
+classification toward their conventions.
 
 **Response** — `application/json`:
 
@@ -43,7 +50,9 @@ but a `note` is still drafted).
   "docType": "Architectural Plan",
   "sectionNumber": "A-100",
   "confidence": "high",
-  "note": "Ground floor plan, drawing A-101, Rev C."
+  "note": "Ground floor plan, drawing A-101, Rev C.",
+  "detectedAddress": "12 Smith Street, Geelong VIC 3220",
+  "detectedJobCode": "GV"
 }
 ```
 
@@ -51,9 +60,14 @@ but a `note` is still drafted).
 - `sectionNumber` is looked up from the matched type by the Worker (the model is
   never trusted to copy it), or `""` when there is no match.
 - `confidence` is one of `high` / `medium` / `low`.
+- `detectedAddress` is the address / site read from the content (especially the title
+  block), or `""` if none found. Independent of `docType` — returned even on no match.
+- `detectedJobCode` is a short job code (e.g. `GV` / `SH` / `CDL`) read from the
+  content, or `""` if none found. The model is told not to invent one.
 - On any internal failure the Worker still returns this exact shape with empty values
-  (`docType: ""`, `confidence: "low"`) plus an `error` field, so the PWA never crashes.
-  Genuinely malformed requests return HTTP `400`.
+  (`docType: ""`, `confidence: "low"`, `detectedAddress: ""`, `detectedJobCode: ""`)
+  plus an `error` field, so the PWA never crashes. Genuinely malformed requests return
+  HTTP `400`.
 
 ## Secrets (set in Cloudflare, never in this repo)
 
@@ -76,7 +90,7 @@ no npm dependencies.
 
 - `GET` the Worker URL in a browser — liveness plus which secrets are wired (no
   values shown):
-  `{"ok":true,"service":"ah-doc-renamer-analyzer","version":"v0.02","model":"gemini-3.1-flash-lite","configured":{"geminiKey":true,"corsOrigins":true}}`.
+  `{"ok":true,"service":"ah-doc-renamer-analyzer","version":"v0.03","model":"gemini-3.1-flash-lite","configured":{"geminiKey":true,"corsOrigins":true}}`.
 - `GET /?selftest=1` — makes ONE real Gemini call and returns `"geminiOk":true` with
   a sample classification when the key is valid and the model name is correct. This is
   the quickest way to confirm the whole pipeline works. Note: it spends one (tiny)

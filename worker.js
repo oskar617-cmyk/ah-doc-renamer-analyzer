@@ -13,22 +13,25 @@
 //   CORS_ORIGINS    Comma-separated allowed browser origins, e.g.
 //                   https://ah-doc-renamer.pages.dev,https://oskar617-cmyk.github.io
 //
-// Contract with the PWA's js/classify.js (DO NOT CHANGE):
+// Contract with the PWA's js/classify.js:
 //   Request  POST application/json:
 //     { filename: string,
 //       text:     string,          // extracted text, up to ~6000 chars
 //       image:    string | null,   // first page rendered to a dataURL, or null
-//       docTypes: [ { docType, sectionNumber, note } ] }  // candidate types
+//       docTypes: [ { docType, sectionNumber, note } ],   // candidate types
+//       examples: [ { snippet, docType } ] }              // optional past user labels (few-shot); may be empty/absent
 //   Response application/json:
-//     { docType:       string,     // exactly one candidate, or "" if none fit
-//       sectionNumber: string,     // section number of the matched type
-//       confidence:    "high" | "medium" | "low",
-//       note:          string }    // short AI draft note describing the file
+//     { docType:         string,   // exactly one candidate, or "" if none fit
+//       sectionNumber:   string,   // section number of the matched type
+//       confidence:      "high" | "medium" | "low",
+//       note:            string,   // short AI draft note describing the file
+//       detectedAddress: string,   // address/site read from content (title block), or ""
+//       detectedJobCode: string }  // short job code (e.g. GV / SH / CDL), or ""
 // ---------------------------------------------------------------------------
 
 // Bump on every release. Reported by the GET health check, and used in the zip
 // filename — this is the Worker's equivalent of a PWA's service-worker VERSION.
-const VERSION = 'v0.02';
+const VERSION = 'v0.03';
 
 // Locked to the model confirmed in chat. To upgrade to gemini-3.5-flash later
 // (paid tier, marginally stronger on messy title blocks) change ONLY this line.
@@ -39,6 +42,10 @@ const GEMINI_ENDPOINT =
 
 const MAX_TEXT_CHARS = 6000;   // defensive cap (PWA already limits to ~6000)
 const MAX_NOTE_CHARS = 500;    // keep the draft note short
+const MAX_ADDR_CHARS = 200;    // cap detectedAddress length
+const MAX_CODE_CHARS = 30;     // cap detectedJobCode length
+const MAX_EXAMPLES = 40;       // cap how many few-shot examples reach the model
+const MAX_EXAMPLE_CHARS = 300; // cap each example snippet length
 const NONE = '__NONE__';       // sentinel the model returns when nothing fits
 
 export default {
@@ -106,9 +113,20 @@ export default {
         note: typeof d.note === 'string' ? d.note : '',
       }));
 
+    // Optional few-shot examples: how the user labelled similar documents before.
+    // Tolerates missing / empty / malformed entries.
+    const examples = (Array.isArray(body.examples) ? body.examples : [])
+      .filter((e) => e && typeof e.snippet === 'string' && typeof e.docType === 'string'
+        && e.snippet.trim() !== '' && e.docType.trim() !== '')
+      .slice(0, MAX_EXAMPLES)
+      .map((e) => ({
+        snippet: e.snippet.trim().slice(0, MAX_EXAMPLE_CHARS),
+        docType: e.docType.trim(),
+      }));
+
     // Always-valid empty result — returned on ANY failure so the PWA, which
     // expects the contract shape, never crashes on a bad/empty response.
-    const emptyResult = { docType: '', sectionNumber: '', confidence: 'low', note: '' };
+    const emptyResult = { docType: '', sectionNumber: '', confidence: 'low', note: '', detectedAddress: '', detectedJobCode: '' };
 
     if (!env.GEMINI_API_KEY) {
       console.error('GEMINI_API_KEY is not set');
@@ -122,6 +140,7 @@ export default {
         text,
         image,
         candidates,
+        examples,
       });
 
       // Resolve the model's choice into the contract shape.
@@ -144,7 +163,14 @@ export default {
       let note = typeof ai.note === 'string' ? ai.note.trim() : '';
       if (note.length > MAX_NOTE_CHARS) note = note.slice(0, MAX_NOTE_CHARS);
 
-      return json({ docType, sectionNumber, confidence, note }, 200, allowOrigin);
+      // detectedAddress / detectedJobCode are independent of the type — keep them
+      // even when docType resolves to "" (no matching candidate).
+      let detectedAddress = typeof ai.detectedAddress === 'string' ? ai.detectedAddress.trim() : '';
+      if (detectedAddress.length > MAX_ADDR_CHARS) detectedAddress = detectedAddress.slice(0, MAX_ADDR_CHARS);
+      let detectedJobCode = typeof ai.detectedJobCode === 'string' ? ai.detectedJobCode.trim() : '';
+      if (detectedJobCode.length > MAX_CODE_CHARS) detectedJobCode = detectedJobCode.slice(0, MAX_CODE_CHARS);
+
+      return json({ docType, sectionNumber, confidence, note, detectedAddress, detectedJobCode }, 200, allowOrigin);
     } catch (err) {
       console.error('Classify failed:', err && err.message ? err.message : err);
       return json({ ...emptyResult, error: 'Classification failed' }, 200, allowOrigin);
@@ -154,8 +180,8 @@ export default {
 
 // --- Gemini call ------------------------------------------------------------
 
-async function classify({ apiKey, filename, text, image, candidates }) {
-  const prompt = buildPrompt({ filename, text, candidates });
+async function classify({ apiKey, filename, text, image, candidates, examples = [] }) {
+  const prompt = buildPrompt({ filename, text, candidates, examples });
   const schema = buildSchema(candidates);
 
   const parts = [{ text: prompt }];
@@ -203,10 +229,12 @@ async function classify({ apiKey, filename, text, image, candidates }) {
     docType: typeof parsed.docType === 'string' ? parsed.docType : '',
     confidence: typeof parsed.confidence === 'string' ? parsed.confidence : 'low',
     note: typeof parsed.note === 'string' ? parsed.note : '',
+    detectedAddress: typeof parsed.detectedAddress === 'string' ? parsed.detectedAddress : '',
+    detectedJobCode: typeof parsed.detectedJobCode === 'string' ? parsed.detectedJobCode : '',
   };
 }
 
-function buildPrompt({ filename, text, candidates }) {
+function buildPrompt({ filename, text, candidates, examples = [] }) {
   const list = candidates.length
     ? candidates
         .map((c, i) => {
@@ -217,18 +245,31 @@ function buildPrompt({ filename, text, candidates }) {
         .join('\n')
     : '(no candidate types provided)';
 
-  return [
+  const lines = [
     'You classify a single construction / architecture document for an Australian residential builder (Auzzie Homes).',
     '',
     'Decide which ONE of the candidate document types below best matches THIS document, based on the document CONTENT — not the filename. The filename is often generic or wrong; treat it as a weak hint only.',
     '',
-    'For drawings, the most reliable identifier is the TITLE BLOCK, usually in the bottom-right corner of the page. Read it carefully (from the page image when one is provided): it gives the sheet name, drawing number, discipline (Architectural / Structural / Hydraulic / Electrical / Civil / Landscape / Survey / etc.) and revision. Prefer the title block over everything else when present.',
+    'For drawings, the most reliable identifier is the TITLE BLOCK, usually in the bottom-right corner of the page. Read it carefully (from the page image when one is provided): it gives the sheet name, drawing number, discipline (Architectural / Structural / Hydraulic / Electrical / Civil / Landscape / Survey / etc.), revision, and often the project address and a short job code. Prefer the title block over everything else when present.',
     '',
     'Rules:',
     '- Choose exactly one docType value from the candidate list.',
     `- If none of the candidates genuinely fit (or no candidates are given), set docType to exactly ${NONE}.`,
     '- confidence: "high" when the title block or text states it clearly; "medium" when you infer it with good evidence; "low" when guessing.',
     '- note: one or two short, factual sentences describing the document, to be edited later by a person. Include the strongest identifiers you found (e.g. drawing number + sheet title + revision; or for a letter / report: subject, sender, date). Do not just repeat the docType as the whole note.',
+    `- detectedAddress: the street address or project / site location THIS document relates to, usually in the title block (bottom-right of a drawing) or the document header. Return it as written. If you cannot find one, return an empty string. This is independent of the document type — fill it in even when docType is ${NONE}.`,
+    '- detectedJobCode: a short job / project code for this document if one is present — typically 2-4 letters or digits (format examples: GV, SH, CDL), often in the title block, as a prefix of the drawing number, or in the filename. Return it as written. If there is no clear short code, return an empty string — do NOT invent one.',
+  ];
+
+  if (examples.length) {
+    lines.push(
+      '',
+      'For guidance, here is how this user has previously classified similar documents. Match these labelling conventions when the current document is similar. They are examples of past choices, not candidate types:',
+      ...examples.map((e) => `- "${e.snippet}" -> ${e.docType}`)
+    );
+  }
+
+  lines.push(
     '',
     'Candidate document types:',
     list,
@@ -238,8 +279,10 @@ function buildPrompt({ filename, text, candidates }) {
     'Extracted text (may be truncated; may be empty for scanned drawings):',
     '"""',
     text || '(no extractable text)',
-    '"""',
-  ].join('\n');
+    '"""'
+  );
+
+  return lines.join('\n');
 }
 
 function buildSchema(candidates) {
@@ -251,8 +294,10 @@ function buildSchema(candidates) {
       docType: { type: 'STRING', enum: docTypeEnum },
       confidence: { type: 'STRING', enum: ['high', 'medium', 'low'] },
       note: { type: 'STRING' },
+      detectedAddress: { type: 'STRING' },
+      detectedJobCode: { type: 'STRING' },
     },
-    required: ['docType', 'confidence', 'note'],
+    required: ['docType', 'confidence', 'note', 'detectedAddress', 'detectedJobCode'],
   };
 }
 
@@ -288,7 +333,7 @@ async function selftest(env, allowOrigin) {
     const ai = await classify({
       apiKey: env.GEMINI_API_KEY,
       filename: 'selftest.pdf',
-      text: 'Ground floor plan. Drawing number A-101. Revision C. Scale 1:100.',
+      text: 'Ground floor plan. Drawing number GV-A-101. Revision C. Project address: 12 Smith Street, Geelong VIC 3220. Job code: GV. Scale 1:100.',
       image: null,
       candidates: [
         { docType: 'Architectural Plan', sectionNumber: 'A-100', note: 'floor plans, elevations, sections' },
@@ -296,7 +341,12 @@ async function selftest(env, allowOrigin) {
       ],
     });
     out.geminiOk = true;
-    out.sample = { docType: ai.docType, confidence: ai.confidence };
+    out.sample = {
+      docType: ai.docType,
+      confidence: ai.confidence,
+      detectedAddress: ai.detectedAddress,
+      detectedJobCode: ai.detectedJobCode,
+    };
     out.detail = 'Gemini responded and the output parsed correctly.';
   } catch (err) {
     out.detail = 'Gemini call failed: ' + (err && err.message ? err.message : String(err));
