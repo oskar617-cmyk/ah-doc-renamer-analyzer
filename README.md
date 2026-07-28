@@ -74,7 +74,7 @@ classification toward their conventions.
 | Name | Value |
 |---|---|
 | `GEMINI_API_KEY` | Google AI Studio (Gemini Developer API) key |
-| `CORS_ORIGINS` | `https://ah-doc-renamer.pages.dev,https://oskar617-cmyk.github.io` |
+| `CORS_ORIGINS` | `https://ah-doc-renamer.pages.dev,https://oskar617-cmyk.github.io`(github.io 已关停,CORS 清理待批) |
 
 `CORS_ORIGINS` is a comma-separated list of allowed browser origins. Browser calls
 from any other origin are rejected (this protects the Gemini quota). Calls with no

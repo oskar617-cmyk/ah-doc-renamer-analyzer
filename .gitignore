@@ -1,3 +1,6 @@
 
 # Claude Code local settings
 .claude/
+
+# Local wrangler deploy cache
+.wrangler/
