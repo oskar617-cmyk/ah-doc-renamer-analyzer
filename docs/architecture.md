@@ -11,7 +11,7 @@
 - 服务对象:`ah-doc-renamer` PWA(contract 锁定于其 `js/classify.js`);模型 `gemini-3.1-flash-lite`(免费 tier)
 - 输入:候选 docType 列表 + extracted text + 首页渲染图;支持 few-shot `examples`
 - 输出:docType(限候选列表内)+ note + detectedAddress + detectedJobCode
-- `?selftest=1` 诊断端点;`VERSION` 常量现为 v0.04
+- `?selftest=1` 诊断端点;`VERSION` 常量现为 v0.05
 - Prompt 原则(v0.04):content-first,优先读 title block,图优先于稀疏文本,文件名只是常错的弱提示
 
 ## 升级规程(每次改动必须走完,顺序不可乱)

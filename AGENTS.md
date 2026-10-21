@@ -9,7 +9,7 @@
 2. 消费端 contract:ah-doc-renamer repo 的 `js/classify.js`
 
 ## 3. Current Snapshot
-`worker.js` 内 VERSION(交接时 v0.04;以实际值为准)。模型 `gemini-3.1-flash-lite`(免费 tier)。(替换制。)
+`worker.js` 内 VERSION v0.05(CF 原地改名;模型与分类 contract 不变)。模型 `gemini-3.1-flash-lite`(免费 tier)。(替换制。)
 
 ## 4. Hard Rules
 - **Contract 锁定于 PWA 的 `js/classify.js`:两边同步改**,单边改 = 破坏。

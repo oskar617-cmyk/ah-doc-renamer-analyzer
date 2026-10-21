@@ -31,7 +31,8 @@
 
 // Bump on every release. Reported by the GET health check, and used in the zip
 // filename — this is the Worker's equivalent of a PWA's service-worker VERSION.
-const VERSION = 'v0.04';
+// v0.05: Rename the existing CF service; model and classification contract unchanged.
+const VERSION = 'v0.05';
 
 // Locked to the model confirmed in chat. To upgrade to gemini-3.5-flash later
 // (paid tier, marginally stronger on messy title blocks) change ONLY this line.
