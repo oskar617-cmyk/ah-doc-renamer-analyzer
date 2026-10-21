@@ -2,7 +2,8 @@
 
 ## 部署机制(红线)
 - Cloudflare 原生 Git 集成:push 到 main 即自动部署上线
-- URL:https://ah-doc-renamer-analyzer.oskar617.workers.dev
+- CF 名:`ah-doc-renamer-worker-analyzer`;URL:https://ah-doc-renamer-worker-analyzer.oskar617.workers.dev
+- 2026-10-22 原地改名，Worker ID `44e4c2f42d8244098cfbf44677660659` 不变；GitHub repo / 本地目录保留 `ah-doc-renamer-analyzer`。先按固定 ID 改 CF 名，再 push 新 wrangler name，防止误建第二个 Worker；PWA 同批发布新地址，旧页面需刷新。
 - 根目录 `wrangler.toml` = Worker 标记;绝不转 Pages、绝不改部署方式
 - Secrets 存 Cloudflare 端,不进代码、不进 git
 

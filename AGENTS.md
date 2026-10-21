@@ -20,11 +20,12 @@
 单 worker.js;secrets 在 Cloudflare 端(GEMINI_API_KEY 等);无持久数据。
 
 ## 6. Commands
-- URL:https://ah-doc-renamer-analyzer.oskar617.workers.dev;诊断端点 `?selftest=1`。
+- CF 名:`ah-doc-renamer-worker-analyzer`;URL:https://ah-doc-renamer-worker-analyzer.oskar617.workers.dev;诊断端点 `?selftest=1`。repo / 本地文件夹仍叫 `ah-doc-renamer-analyzer`。
 - 部署:Cloudflare 原生 Git 集成——**push 到 main 即自动部署上线**(所以 push 前逐次问)。
 - GitHub repo:github.com/oskar617-cmyk/ah-doc-renamer-analyzer(private)。
 
 ## 7. Verification And Release
+本地:`npm.cmd test`(模拟 Gemini,不花真实额度);改 JS 加 ES module parse。
 改完先问 Oskar → push(即上线)→ `?selftest=1` 验证 → 通知消费端 repo 核对 contract。
 
 ## 8. Multi-Agent Conflict Hotspots

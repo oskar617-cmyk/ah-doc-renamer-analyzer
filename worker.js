@@ -68,7 +68,7 @@ export default {
       }
       return json({
         ok: true,
-        service: 'ah-doc-renamer-analyzer',
+        service: 'ah-doc-renamer-worker-analyzer',
         version: VERSION,
         model: MODEL,
         configured: {

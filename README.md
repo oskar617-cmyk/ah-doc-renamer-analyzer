@@ -15,7 +15,8 @@ Gemini, native Workers format, auto-deployed from its GitHub repo).
 
 - **Repo:** `oskar617-cmyk/ah-doc-renamer-analyzer`
 - **Version:** `v0.04` (the `VERSION` constant at the top of `worker.js`; bump on every release)
-- **Worker URL (after deploy):** `https://ah-doc-renamer-analyzer.oskar617.workers.dev`
+- **Cloudflare Worker:** `ah-doc-renamer-worker-analyzer` (renamed in place; repository name unchanged)
+- **Worker URL:** `https://ah-doc-renamer-worker-analyzer.oskar617.workers.dev`
 - **Model:** `gemini-3.1-flash-lite` (free tier, multimodal). Set in the `MODEL`
   constant at the top of `worker.js`.
 
@@ -87,6 +88,8 @@ redeploys automatically on every push to the connected GitHub repo. No build ste
 no npm dependencies.
 
 ## Test
+
+- `npm test` runs local contract, CORS and naming checks with a mocked Gemini response (no API key or external call).
 
 - `GET` the Worker URL in a browser — liveness plus which secrets are wired (no
   values shown):
