@@ -1,3 +1,7 @@
+import { protectIp, authenticate, authorize } from './auth.js';
+import { HttpError, readJson } from './security-http.js';
+import { classify, MODEL } from './analyzer.js';
+
 // AH Doc Renamer — analyzer Worker
 // ---------------------------------------------------------------------------
 // Cloudflare Worker (native module format). The AI brain for the AH Doc Renamer
@@ -10,11 +14,13 @@
 //
 // Secrets (set in Cloudflare — NEVER committed to this repo):
 //   GEMINI_API_KEY  Google AI Studio (Gemini Developer API) key
+//   ENTRA_CLIENT_SECRET  Dedicated confidential-client credential for delegated OBO
 //   CORS_ORIGINS    Comma-separated allowed browser origins, e.g.
 //                   https://ah-doc-renamer.pages.dev,https://oskar617-cmyk.github.io
 //
 // Contract with the PWA's js/classify.js:
 //   Request  POST application/json:
+//     Authorization: Bearer <Entra v2 API access token, Analyzer.Invoke scope>
 //     { filename: string,
 //       text:     string,          // extracted text, up to ~6000 chars
 //       image:    string | null,   // first page rendered to a dataURL, or null
@@ -34,13 +40,6 @@
 // v0.05: Rename the existing CF service; model and classification contract unchanged.
 const VERSION = 'v0.05';
 
-// Locked to the model confirmed in chat. To upgrade to gemini-3.5-flash later
-// (paid tier, marginally stronger on messy title blocks) change ONLY this line.
-const MODEL = 'gemini-3.1-flash-lite';
-
-const GEMINI_ENDPOINT =
-  `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-
 const MAX_TEXT_CHARS = 6000;   // defensive cap (PWA already limits to ~6000)
 const MAX_NOTE_CHARS = 500;    // keep the draft note short
 const MAX_ADDR_CHARS = 200;    // cap detectedAddress length
@@ -54,18 +53,26 @@ export default {
     const origin = request.headers.get('Origin') || '';
     const allowOrigin = pickAllowedOrigin(origin, env.CORS_ORIGINS);
 
-    // CORS preflight
+    if (new URL(request.url).pathname !== '/') return json({ error: 'Not found' }, 404, allowOrigin);
+    if (origin && !allowOrigin) return json({ error: 'Origin not allowed' }, 403, '');
+
+    // CORS is a browser policy, not authentication.
     if (request.method === 'OPTIONS') {
+      if (!allowOrigin) return json({ error: 'Origin not allowed' }, 403, '');
       return new Response(null, { status: 204, headers: corsHeaders(allowOrigin) });
     }
 
-    // Health check / self-test — open in a browser to confirm the Worker is live.
+    // Free public liveness; any self-test goes through the same security gate.
     //   GET /            -> liveness + which secrets are wired (no secret values shown)
-    //   GET /?selftest=1 -> makes ONE real Gemini call to confirm the key works
+    //   GET /?selftest=1 -> authenticated/authorized/limited real Gemini call
     if (request.method === 'GET') {
       const url = new URL(request.url);
       if (url.searchParams.get('selftest') === '1') {
-        return await selftest(env, allowOrigin);
+        try {
+          await protectIp(request, env);
+          await authorize(await authenticate(request, env), env);
+          return await selftest(env, allowOrigin);
+        } catch (error) { return securityError(error, allowOrigin); }
       }
       return json({
         ok: true,
@@ -83,19 +90,19 @@ export default {
       return json({ error: 'Method not allowed' }, 405, allowOrigin);
     }
 
-    // Block browser calls from origins we did not authorise (protects the
-    // Gemini quota). Calls with no Origin header (curl / server-to-server) pass.
-    if (origin && !allowOrigin) {
-      return json({ error: 'Origin not allowed' }, 403, '');
-    }
-
-    // Parse and lightly validate the request body
+    // Verify identity before reading untrusted bytes. Calls without Origin use
+    // exactly the same authentication and limiters as browser requests.
     let body;
     try {
-      body = await request.json();
-    } catch {
-      return json({ error: 'Invalid JSON body' }, 400, allowOrigin);
-    }
+      await protectIp(request, env);
+      const identity = await authenticate(request, env);
+      if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('Content-Type') || '')) {
+        throw new HttpError(415, 'Send application/json');
+      }
+      body = await readJson(request, 8 * 1024 * 1024, AbortSignal.timeout(5000));
+      validateInput(body);
+      await authorize(identity, env);
+    } catch (error) { return securityError(error, allowOrigin); }
 
     const filename = typeof body.filename === 'string' ? body.filename : '';
     let text = typeof body.text === 'string' ? body.text : '';
@@ -130,8 +137,7 @@ export default {
     const emptyResult = { docType: '', sectionNumber: '', confidence: 'low', note: '', detectedAddress: '', detectedJobCode: '' };
 
     if (!env.GEMINI_API_KEY) {
-      console.error('GEMINI_API_KEY is not set');
-      return json({ ...emptyResult, error: 'Server not configured (missing GEMINI_API_KEY)' }, 200, allowOrigin);
+      return json({ ...emptyResult, error: 'Analyzer is not configured' }, 503, allowOrigin);
     }
 
     try {
@@ -172,149 +178,11 @@ export default {
       if (detectedJobCode.length > MAX_CODE_CHARS) detectedJobCode = detectedJobCode.slice(0, MAX_CODE_CHARS);
 
       return json({ docType, sectionNumber, confidence, note, detectedAddress, detectedJobCode }, 200, allowOrigin);
-    } catch (err) {
-      console.error('Classify failed:', err && err.message ? err.message : err);
-      return json({ ...emptyResult, error: 'Classification failed' }, 200, allowOrigin);
+    } catch {
+      return json({ ...emptyResult, error: 'Classification failed. No automatic retry was made.' }, 502, allowOrigin);
     }
   },
 };
-
-// --- Gemini call ------------------------------------------------------------
-
-async function classify({ apiKey, filename, text, image, candidates, examples = [] }) {
-  const prompt = buildPrompt({ filename, text, candidates, examples });
-  const schema = buildSchema(candidates);
-
-  const parts = [{ text: prompt }];
-  if (image) {
-    const img = parseDataUrl(image);
-    if (img) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
-  }
-
-  const reqBody = {
-    contents: [{ role: 'user', parts }],
-    generationConfig: {
-      temperature: 0,
-      responseMimeType: 'application/json',
-      responseSchema: schema,
-      maxOutputTokens: 8192,
-    },
-  };
-
-  const resp = await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(reqBody),
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text().catch(() => '');
-    throw new Error(`Gemini ${resp.status}: ${errText.slice(0, 300)}`);
-  }
-
-  const data = await resp.json();
-  const out = extractText(data);
-  if (!out) throw new Error('Empty model output');
-
-  let parsed;
-  try {
-    parsed = JSON.parse(out);
-  } catch {
-    // Salvage a JSON object if the model wrapped it in any extra prose.
-    const m = out.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('Model output was not JSON');
-    parsed = JSON.parse(m[0]);
-  }
-
-  return {
-    docType: typeof parsed.docType === 'string' ? parsed.docType : '',
-    confidence: typeof parsed.confidence === 'string' ? parsed.confidence : 'low',
-    note: typeof parsed.note === 'string' ? parsed.note : '',
-    detectedAddress: typeof parsed.detectedAddress === 'string' ? parsed.detectedAddress : '',
-    detectedJobCode: typeof parsed.detectedJobCode === 'string' ? parsed.detectedJobCode : '',
-  };
-}
-
-function buildPrompt({ filename, text, candidates, examples = [] }) {
-  const list = candidates.length
-    ? candidates
-        .map((c, i) => {
-          const sec = c.sectionNumber ? ` [${c.sectionNumber}]` : '';
-          const meaning = c.note ? ` — ${c.note}` : '';
-          return `${i + 1}. ${c.docType}${sec}${meaning}`;
-        })
-        .join('\n')
-    : '(no candidate types provided)';
-
-  const lines = [
-    'You classify a single construction / architecture document for an Australian residential builder (Auzzie Homes).',
-    '',
-    'CORE PRINCIPLE — CONTENT FIRST, FILENAME IS ONLY A WEAK HINT:',
-    '- Decide the document type from its CONTENT, never from its filename when any content is readable.',
-    '- The single most important source is the drawing TITLE BLOCK (the drawing frame) — usually in the BOTTOM-RIGHT corner, or a vertical strip down the RIGHT-HAND side. It holds the sheet / drawing name, the discipline (Architectural / Structural / Hydraulic / Electrical / Civil / Landscape / Survey / etc.), the project address, and the drawing number. Read it FIRST and prefer it over everything else.',
-    '- The page image provided is HIGH RESOLUTION. Read the text inside the title block carefully from the image. The extracted "text" field is often sparse or empty (vector drawings frequently yield no extractable text), so the IMAGE is usually MORE important than the text.',
-    '- The filename is only a WEAK HINT and is OFTEN WRONG — external designers name files arbitrarily. NEVER classify on the filename alone when any content is readable.',
-    '- If the content (title block) and the filename CONFLICT, always trust the content and ignore the filename.',
-    '- Fall back to the filename ONLY when both the image and the text are completely unreadable or contain no useful information.',
-    '',
-    'Rules:',
-    '- Choose exactly one docType value from the candidate list.',
-    `- If none of the candidates genuinely fit (or no candidates are given), set docType to exactly ${NONE}.`,
-    '- confidence: "high" when the title block or text states it clearly; "medium" when you infer it with good evidence; "low" when guessing.',
-    '- note: one or two short, factual sentences describing the document, to be edited later by a person. Include the strongest identifiers you found (e.g. drawing number + sheet title + revision; or for a letter / report: subject, sender, date). Do not just repeat the docType as the whole note.',
-    `- detectedAddress: the street address or project / site location THIS document relates to, usually in the title block (bottom-right of a drawing) or the document header. Return it as written. If you cannot find one, return an empty string. This is independent of the document type — fill it in even when docType is ${NONE}.`,
-    '- detectedJobCode: a short job / project code for this document if one is present — typically 2-4 letters or digits (format examples: GV, SH, CDL), often in the title block, as a prefix of the drawing number, or in the filename. Return it as written. If there is no clear short code, return an empty string — do NOT invent one.',
-  ];
-
-  if (examples.length) {
-    lines.push(
-      '',
-      'For guidance, here is how this user has previously classified similar documents. Match these labelling conventions when the current document is similar. They are examples of past choices, not candidate types:',
-      ...examples.map((e) => `- "${e.snippet}" -> ${e.docType}`)
-    );
-  }
-
-  lines.push(
-    '',
-    'Candidate document types:',
-    list,
-    '',
-    `Filename: ${filename || '(none)'}`,
-    '',
-    'Extracted text (may be truncated; may be empty for scanned drawings):',
-    '"""',
-    text || '(no extractable text)',
-    '"""'
-  );
-
-  return lines.join('\n');
-}
-
-function buildSchema(candidates) {
-  const docTypeEnum = candidates.map((c) => c.docType);
-  docTypeEnum.push(NONE);
-  return {
-    type: 'OBJECT',
-    properties: {
-      docType: { type: 'STRING', enum: docTypeEnum },
-      confidence: { type: 'STRING', enum: ['high', 'medium', 'low'] },
-      note: { type: 'STRING' },
-      detectedAddress: { type: 'STRING' },
-      detectedJobCode: { type: 'STRING' },
-    },
-    required: ['docType', 'confidence', 'note', 'detectedAddress', 'detectedJobCode'],
-  };
-}
-
-function extractText(data) {
-  try {
-    const parts = data.candidates?.[0]?.content?.parts;
-    if (!Array.isArray(parts)) return '';
-    return parts.map((p) => (typeof p.text === 'string' ? p.text : '')).join('').trim();
-  } catch {
-    return '';
-  }
-}
 
 // One-shot end-to-end check: confirms GEMINI_API_KEY actually works and the model
 // name is valid. Makes ONE tiny real Gemini call. Exposes no secret values.
@@ -353,26 +221,13 @@ async function selftest(env, allowOrigin) {
       detectedJobCode: ai.detectedJobCode,
     };
     out.detail = 'Gemini responded and the output parsed correctly.';
-  } catch (err) {
-    out.detail = 'Gemini call failed: ' + (err && err.message ? err.message : String(err));
+  } catch {
+    out.detail = 'Gemini call failed. No automatic retry was made.';
   }
-  return json(out, 200, allowOrigin);
+  return json(out, out.geminiOk ? 200 : 502, allowOrigin);
 }
 
 // --- Helpers ----------------------------------------------------------------
-
-function parseDataUrl(dataUrl) {
-  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return null;
-  const comma = dataUrl.indexOf(',');
-  if (comma === -1) return null;
-  const meta = dataUrl.slice(5, comma); // between 'data:' and the first comma
-  const data = dataUrl.slice(comma + 1);
-  if (!data || !/;base64$/i.test(meta)) return null; // expect base64 image data
-  let mimeType = meta.replace(/;base64$/i, '');
-  if (!mimeType) mimeType = 'image/png';
-  if (!/^image\//i.test(mimeType)) return null; // images only; ignore anything else
-  return { mimeType, data };
-}
 
 function pickAllowedOrigin(origin, corsOrigins) {
   if (!origin || !corsOrigins) return '';
@@ -386,8 +241,9 @@ function pickAllowedOrigin(origin, corsOrigins) {
 
 function corsHeaders(allowOrigin) {
   const h = {
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Expose-Headers': 'Retry-After',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
@@ -395,12 +251,47 @@ function corsHeaders(allowOrigin) {
   return h;
 }
 
-function json(obj, status, allowOrigin) {
+function json(obj, status, allowOrigin, extraHeaders = {}) {
   return new Response(JSON.stringify(obj), {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
       ...corsHeaders(allowOrigin),
+      ...extraHeaders,
     },
   });
+}
+
+function securityError(error, origin) {
+  const status = error instanceof HttpError ? error.status : 503;
+  return json({ error: error instanceof HttpError ? error.message : 'Analyzer protection is unavailable' }, status, origin,
+    status === 429 ? { 'Retry-After': '60' } : status === 401 ? { 'WWW-Authenticate': 'Bearer' } : {});
+}
+
+function validateInput(body) {
+  const invalid = () => { throw new HttpError(400, 'Invalid classifier request'); };
+  if (!body || typeof body !== 'object' || Array.isArray(body)) invalid();
+  if (body.filename != null && (typeof body.filename !== 'string' || body.filename.length > 1024)) invalid();
+  if (body.text != null && (typeof body.text !== 'string' || body.text.length > 100000)) invalid();
+  if (!Array.isArray(body.docTypes) || body.docTypes.length > 500) invalid();
+  const seen = new Set();
+  for (const entry of body.docTypes) {
+    if (!entry || typeof entry.docType !== 'string' || !entry.docType.trim() || entry.docType.length > 200 ||
+        entry.docType.trim() === NONE || seen.has(entry.docType.trim()) ||
+        (entry.sectionNumber != null && (typeof entry.sectionNumber !== 'string' || entry.sectionNumber.length > 100)) ||
+        (entry.note != null && (typeof entry.note !== 'string' || entry.note.length > 2000))) invalid();
+    seen.add(entry.docType.trim());
+  }
+  if (body.examples != null && (!Array.isArray(body.examples) || body.examples.length > MAX_EXAMPLES)) invalid();
+  for (const example of body.examples || []) {
+    if (!example || typeof example.snippet !== 'string' || example.snippet.length > 2000 ||
+        typeof example.docType !== 'string' || !seen.has(example.docType.trim())) invalid();
+  }
+  if (body.image != null) {
+    if (typeof body.image !== 'string' || body.image.length > 7 * 1024 * 1024) invalid();
+    const match = /^data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(body.image);
+    if (!match || match[1].length % 4 !== 0) invalid();
+  }
 }

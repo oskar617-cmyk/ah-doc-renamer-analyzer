@@ -4,3 +4,7 @@
 
 # Local wrangler deploy cache
 .wrangler/
+
+node_modules/
+.dev.vars*
+.env*

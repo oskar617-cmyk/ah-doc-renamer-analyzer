@@ -2,7 +2,7 @@
 
 ## 1. Identity
 - 代理 Gemini 的 Worker,AH Doc Renamer 的 AI 大脑:输入候选 docType 列表 + 文本 + 首页图,输出分类 + note + detectedAddress / detectedJobCode;支持 few-shot `examples`。
-- 技术特征:Uses MSAL: no · Deploy target: Cloudflare Worker(**纯 Worker:push 即上线、无 staging——push/deploy 逐次先问 Oskar**)· PWA: no。
+- 技术特征:Uses MSAL: no · Deploy target: Cloudflare Worker(**纯 Worker:push 即上线、无 staging——push/deploy 逐次先问 Oskar**)· PWA: no · AI: yes。
 
 ## 2. Read First
 1. `docs/`(如有)与 `worker.js` 头部注释
@@ -17,7 +17,7 @@
 - Prompt 原则(v0.04):content-first,优先读 title block,图优先于稀疏文本,文件名只是常错的弱提示。
 
 ## 5. Architecture And Data Boundaries
-单 worker.js;secrets 在 Cloudflare 端(GEMINI_API_KEY 等);无持久数据。
+worker.js = 请求入口;auth.js = Entra v2 验签、OBO 准入核对与限流;analyzer.js = Gemini 分类;security-http.js = 有界 HTTP。Secrets 只在 CF 与本机 secrets;无持久业务数据。只读原准入文件,不建文件夹、不写客户文件。
 
 ## 6. Commands
 - CF 名:`ah-doc-renamer-worker-analyzer`;URL:https://ah-doc-renamer-worker-analyzer.oskar617.workers.dev;诊断端点 `?selftest=1`。repo / 本地文件夹仍叫 `ah-doc-renamer-analyzer`。
@@ -26,7 +26,7 @@
 
 ## 7. Verification And Release
 本地:`npm.cmd test`(模拟 Gemini,不花真实额度);改 JS 加 ES module parse。
-改完先问 Oskar → push(即上线)→ `?selftest=1` 验证 → 通知消费端 repo 核对 contract。
+改完先问 Oskar → push(即上线)→ 未登录 401 + 带有效 Analyzer.Invoke token 的合成分类验证 → 通知消费端核对 contract。`?selftest=1` 同样须鉴权、准入与限流。
 
 ## 8. Multi-Agent Conflict Hotspots
 - contract(输入/输出 shape)与 ah-doc-renamer 联动:跨 repo 先协调。

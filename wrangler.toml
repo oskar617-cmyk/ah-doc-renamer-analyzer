@@ -2,6 +2,30 @@ name = "ah-doc-renamer-worker-analyzer"
 main = "worker.js"
 compatibility_date = "2026-06-01"
 
+[vars]
+ENTRA_TENANT_ID = "ff968505-cca0-4cd1-9f6d-68ce6eaf06c7"
+ENTRA_CLIENT_ID = "3302edd3-505b-496d-ab66-707fa7a2d827"
+ADMIN_EMAIL = "oskar@auhs.com.au"
+RESERVED_EMAILS = "hello@vaef.app"
+ACCESS_SHAREPOINT_HOST = "auzziehomes.sharepoint.com"
+ACCESS_SITE_PATH = "/sites/AHSite"
+ACCESS_LIST_PATH = "AH Apps Docs/AH Doc Renamer/allowed-users.json"
+
+# Approximate per-location protection, not a global quota or spending cap.
+[[ratelimits]]
+name = "ANALYZER_IP_LIMITER"
+namespace_id = "33025051"
+[ratelimits.simple]
+limit = 240
+period = 60
+
+[[ratelimits]]
+name = "ANALYZER_USER_LIMITER"
+namespace_id = "33025052"
+[ratelimits.simple]
+limit = 60
+period = 60
+
 # Secrets are NOT stored in this file (it is committed to GitHub).
 # Set them in Cloudflare as SECRET type:
 #   Workers & Pages -> ah-doc-renamer-worker-analyzer -> Settings -> Variables and Secrets
