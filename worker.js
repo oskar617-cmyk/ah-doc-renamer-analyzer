@@ -37,8 +37,8 @@ import { classify, MODEL } from './analyzer.js';
 
 // Bump on every release. Reported by the GET health check, and used in the zip
 // filename — this is the Worker's equivalent of a PWA's service-worker VERSION.
-// v0.07: Workerd-compatible redirect rejection for OBO, Graph and Gemini.
-const VERSION = 'v0.07';
+// v0.08: AH Files is a separate verified client with its own access policy.
+const VERSION = 'v0.08';
 
 const MAX_TEXT_CHARS = 6000;   // defensive cap (PWA already limits to ~6000)
 const MAX_NOTE_CHARS = 500;    // keep the draft note short
