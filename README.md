@@ -14,7 +14,7 @@ Sibling of the AH Est Email Classifier Worker; same shape (Cloudflare Worker pro
 Gemini, native Workers format, auto-deployed from its GitHub repo).
 
 - **Repo:** `oskar617-cmyk/ah-doc-renamer-analyzer`
-- **Version:** `v0.05` (the `VERSION` constant at the top of `worker.js`; bump on every release)
+- **Version:** `v0.06` (the `VERSION` constant at the top of `worker.js`; bump on every release)
 - **Cloudflare Worker:** `ah-doc-renamer-worker-analyzer` (renamed in place; repository name unchanged)
 - **Worker URL:** `https://ah-doc-renamer-worker-analyzer.oskar617.workers.dev`
 - **Model:** `gemini-3.1-flash-lite` (multimodal). Set in `analyzer.js`.
@@ -126,7 +126,7 @@ compatibility path. A rollback must retain authentication and throttling.
 
 - `GET` the Worker URL in a browser — liveness plus which secrets are wired (no
   values shown):
-  `{"ok":true,"service":"ah-doc-renamer-worker-analyzer","version":"v0.05","model":"gemini-3.1-flash-lite","configured":{"geminiKey":true,"corsOrigins":true}}`.
+  `{"ok":true,"service":"ah-doc-renamer-worker-analyzer","version":"v0.06","model":"gemini-3.1-flash-lite","configured":{"geminiKey":true,"corsOrigins":true}}`.
 - `GET /?selftest=1` requires the same authenticated/authorized/limited API access as
   classification and makes ONE synthetic Gemini call. Anonymous requests return 401.
 - `POST` a sample body (see Contract) — should return a valid response object whose
