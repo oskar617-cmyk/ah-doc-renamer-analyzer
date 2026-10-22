@@ -9,7 +9,7 @@
 2. 消费端 contract:ah-doc-renamer repo 的 `js/classify.js`
 
 ## 3. Current Snapshot
-`worker.js` 内 VERSION v0.06(Entra API token + delegated OBO 准入 + IP/用户限流)。模型 `gemini-3.1-flash-lite`不变;实际费用/额度取决于 key 所属账号。(替换制。)
+`worker.js` 内 VERSION v0.07(Entra API token + delegated OBO 准入 + IP/用户限流;workerd 跳转兼容修复)。模型 `gemini-3.1-flash-lite`不变;实际费用/额度取决于 key 所属账号。(替换制。)
 
 ## 4. Hard Rules
 - **Contract 锁定于 PWA 的 `js/classify.js`:两边同步改**,单边改 = 破坏。
