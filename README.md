@@ -75,7 +75,9 @@ classification toward their conventions.
 
 - One existing Entra registration: `3302edd3-505b-496d-ab66-707fa7a2d827`.
   Exposes `api://3302edd3-505b-496d-ab66-707fa7a2d827/Analyzer.Invoke`, admin-only
-  consent, preauthorized only for that same client, `requestedAccessTokenVersion: 2`.
+  consent, `requestedAccessTokenVersion: 2`. AH Files integration adds only client
+  `595e53b0-9261-4fca-943e-0bf15f048fc4` for this existing scope; audience remains
+  the Analyzer API, not Graph or the AH Files client. No new credential is needed.
 - Verify Microsoft's RS256 signature/JWKS, exact tenant/issuer/audience/azp,
   delegated scope, oid/sub and token lifetime. Graph and ID tokens are rejected.
 - IP limiter runs before authentication; user limiter uses verified tenant + oid.
@@ -86,6 +88,15 @@ classification toward their conventions.
   are refused. No Graph bearer is sent to the file download host or AI provider.
 - Original path remains `AH Apps Docs/AH Doc Renamer/allowed-users.json` in AH Site.
   Missing/changed/unreadable file fails closed; no folder/file is created.
+- Verified token `azp` selects the access policy. The old Renamer client still
+  uses its `users[].email` list; the AH Files client reads only
+  `AH Apps Docs/AH Files/user-settings.json` and its exact-UPN `admins`/`allowed`
+  arrays. Empty lists are not open access, and an `oskar@` prefix is not an admin.
+  Both retain the verified exact bootstrap admin and reserved-identity rejection.
+  Origin/request JSON cannot select a different policy. Rules/storage migration
+  must explicitly update the Files path; there is no guessed-path fallback.
+- `ADDITIONAL_CORS_ORIGINS` adds exact AH Files production and local-test origins
+  without replacing the original `CORS_ORIGINS` secret. CORS grants no API access.
 - `ANALYZER_IP_LIMITER`: 240 requests / 60 seconds;
   `ANALYZER_USER_LIMITER`: 60 requests / 60 seconds. These are approximate per-CF-
   location protections, **not global hard quotas or billing controls**.

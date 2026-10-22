@@ -10,6 +10,9 @@ RESERVED_EMAILS = "hello@vaef.app"
 ACCESS_SHAREPOINT_HOST = "auzziehomes.sharepoint.com"
 ACCESS_SITE_PATH = "/sites/AHSite"
 ACCESS_LIST_PATH = "AH Apps Docs/AH Doc Renamer/allowed-users.json"
+AH_FILES_CLIENT_ID = "595e53b0-9261-4fca-943e-0bf15f048fc4"
+AH_FILES_ACCESS_PATH = "AH Apps Docs/AH Files/user-settings.json"
+ADDITIONAL_CORS_ORIGINS = "https://ah-files.pages.dev,http://localhost:8137"
 
 # Approximate per-location protection, not a global quota or spending cap.
 [[ratelimits]]

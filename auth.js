@@ -52,7 +52,9 @@ export async function authenticate(request, env) {
   } catch {
     throw new HttpError(401, 'Analyzer sign-in is invalid or expired. Sign in again.');
   }
-  if (claims.ver !== '2.0' || claims.tid !== tenant || claims.azp !== clientId ||
+  const allowedClient = claims.azp === clientId ||
+    (GUID.test(env.AH_FILES_CLIENT_ID || '') && claims.azp === env.AH_FILES_CLIENT_ID);
+  if (claims.ver !== '2.0' || claims.tid !== tenant || !allowedClient ||
       !GUID.test(claims.oid || '') || typeof claims.sub !== 'string' || !claims.sub ||
       typeof claims.scp !== 'string' || !claims.scp.split(' ').includes('Analyzer.Invoke') ||
       claims.idtyp === 'app' || claims.iat > Date.now() / 1000 + 30) {
@@ -60,12 +62,15 @@ export async function authenticate(request, env) {
   }
   // Stable tenant/object ID, not email, IP, or unverified request JSON.
   await rateLimit(env.ANALYZER_USER_LIMITER, `analyzer:user:${tenant}:${claims.oid}`);
-  return { token, oid: claims.oid };
+  // The verified azp selects the policy, never Origin, a body field or email.
+  return { token, oid: claims.oid, clientId: claims.azp };
 }
 
 export async function authorize(identity, env) {
   const signal = AbortSignal.timeout(12000);
   try {
+    const fromFiles = identity.clientId === env.AH_FILES_CLIENT_ID && !!env.AH_FILES_CLIENT_ID;
+    if (!fromFiles && identity.clientId !== env.ENTRA_CLIENT_ID) throw new HttpError(403, 'This account cannot use the analyzer');
     // Delegated OBO only. No client-credentials grant or application permissions.
     const result = await fetchJson(`https://login.microsoftonline.com/${env.ENTRA_TENANT_ID}/oauth2/v2.0/token`, {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -90,13 +95,14 @@ export async function authorize(identity, env) {
     // caller-supplied email or mutable mail/displayName field. Guests have #EXT# UPNs.
     if (email === normalized(env.ADMIN_EMAIL) && me.userType === 'Member') return;
 
-    if (!env.ACCESS_SHAREPOINT_HOST || !env.ACCESS_SITE_PATH || !env.ACCESS_LIST_PATH) {
+    const accessPath = fromFiles ? env.AH_FILES_ACCESS_PATH : env.ACCESS_LIST_PATH;
+    if (!env.ACCESS_SHAREPOINT_HOST || !env.ACCESS_SITE_PATH || !accessPath) {
       throw new Error('Access list not configured');
     }
     const site = await fetchJson(GRAPH + '/sites/' + env.ACCESS_SHAREPOINT_HOST + ':' + env.ACCESS_SITE_PATH + '?$select=id', { headers }, 16384, signal);
     if (typeof site.id !== 'string' || !site.id) throw new Error('Invalid site');
     const drive = `/sites/${encodeURIComponent(site.id)}/drive`;
-    const path = env.ACCESS_LIST_PATH.split('/').map(encodeURIComponent).join('/');
+    const path = accessPath.split('/').map(encodeURIComponent).join('/');
     const metadata = await fetchJson(GRAPH + drive + '/root:/' + path + '?$select=id,eTag,size,@microsoft.graph.downloadUrl', { headers }, 32768, signal);
     if (typeof metadata.id !== 'string' || !metadata.id || !metadata.eTag || metadata.size > 262144) throw new Error('Invalid access list');
     const download = new URL(metadata['@microsoft.graph.downloadUrl']);
@@ -108,7 +114,18 @@ export async function authorize(identity, env) {
     const access = await fetchJson(download, {}, 262144, signal);
     const after = await fetchJson(GRAPH + drive + '/items/' + encodeURIComponent(metadata.id) + '?$select=id,eTag', { headers }, 16384, signal);
     if (after.id !== metadata.id || after.eTag !== metadata.eTag) throw new Error('Access list changed');
-    if (!access || !Array.isArray(access.users) || !access.users.some(user => normalized(user?.email) === email)) {
+    let permitted = false;
+    if (fromFiles) {
+      // AH Files uses full-UPN admins/allowed arrays. An absent/empty list is
+      // never "everyone"; Renamer's users array cannot grant Files access.
+      if (!access || typeof access !== 'object' || Array.isArray(access) ||
+          (access.admins != null && !Array.isArray(access.admins)) ||
+          (access.allowed != null && !Array.isArray(access.allowed))) throw new Error('Invalid Files access list');
+      permitted = [...(access.admins || []), ...(access.allowed || [])].some(value => normalized(value) === email);
+    } else {
+      permitted = !!access && Array.isArray(access.users) && access.users.some(user => normalized(user?.email) === email);
+    }
+    if (!permitted) {
       throw new HttpError(403, 'This account cannot use the analyzer');
     }
   } catch (error) {

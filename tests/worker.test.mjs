@@ -9,6 +9,7 @@ const endpoint = 'https://ah-doc-renamer-worker-analyzer.oskar617.workers.dev/';
 const origin = 'https://ah-doc-renamer.pages.dev';
 const tenant = 'ff968505-cca0-4cd1-9f6d-68ce6eaf06c7';
 const client = '3302edd3-505b-496d-ab66-707fa7a2d827';
+const filesClient = '595e53b0-9261-4fca-943e-0bf15f048fc4';
 const oid = '11111111-1111-4111-8111-111111111111';
 const keys = await generateKeyPair('RS256');
 const publicKey = { ...await exportJWK(keys.publicKey), kid: 'test-key', alg: 'RS256', use: 'sig' };
@@ -34,6 +35,8 @@ function setup(t, options = {}) {
     ENTRA_TENANT_ID: tenant, ENTRA_CLIENT_ID: client, ADMIN_EMAIL: 'oskar@auhs.com.au', RESERVED_EMAILS: 'hello@vaef.app',
     ACCESS_SHAREPOINT_HOST: 'auzziehomes.sharepoint.com', ACCESS_SITE_PATH: '/sites/AHSite',
     ACCESS_LIST_PATH: 'AH Apps Docs/AH Doc Renamer/allowed-users.json',
+    AH_FILES_CLIENT_ID: filesClient, AH_FILES_ACCESS_PATH: 'AH Apps Docs/AH Files/user-settings.json',
+    ADDITIONAL_CORS_ORIGINS: 'https://ah-files.pages.dev,http://localhost:8137',
     ANALYZER_IP_LIMITER: { limit: async ({ key }) => { limitKeys.push(key); return { success: !options.ipLimited }; } },
     ANALYZER_USER_LIMITER: { limit: async ({ key }) => { limitKeys.push(key); return { success: !options.userLimited }; } },
   };
@@ -67,7 +70,8 @@ function setup(t, options = {}) {
     if (url.hostname === 'auzziehomes.sharepoint.com') {
       assert.equal(init.headers, undefined, 'Graph bearer must not reach the download host');
       assert.equal(init.redirect, 'manual');
-      return options.invalidList ? Response.json({ users: null }) : Response.json({ users: options.denied ? [] : [{ email }] });
+      return options.access !== undefined ? Response.json(options.access) :
+        options.invalidList ? Response.json({ users: null }) : Response.json({ users: options.denied ? [] : [{ email }] });
     }
     assert.equal(url.hostname, 'generativelanguage.googleapis.com');
     assert.equal(url.search, '', 'AI secret must not be in the URL');
@@ -246,4 +250,81 @@ test('JSON reader bounds actual streaming bytes and cancels stalled streams', as
   try { await assert.rejects(readJson(hanging, 100, controller.signal), /abort/i); }
   finally { clearTimeout(timer); }
   assert.equal(cancelled, true);
+});
+
+test('Files client receives its own policy while the API audience and OBO resource stay unchanged', async t => {
+  const f = setup(t, { access: { admins: [], allowed: [email] } });
+  const result = await worker.fetch(request(await token({ azp: filesClient }), {
+    headers: { Origin: 'https://ah-files.pages.dev' },
+  }), f.env);
+  assert.equal(result.status, 200);
+  assert.equal(result.headers.get('Access-Control-Allow-Origin'), 'https://ah-files.pages.dev');
+  assert.equal(f.aiCalls().length, 1);
+  const metadata = f.calls.find(call => call.url.pathname.includes('/root:/'));
+  assert.match(decodeURIComponent(metadata.url.pathname), /AH Apps Docs\/AH Files\/user-settings.json/);
+  assert.equal(f.calls.some(call => decodeURIComponent(call.url.pathname).includes('allowed-users.json')), false);
+  const exchange = f.calls.find(call => call.url.pathname.endsWith('/token'));
+  assert.equal(new URLSearchParams(exchange.init.body).get('client_id'), client);
+});
+
+test('Files and Renamer access lists are not interchangeable, including requests without Origin', async t => {
+  for (const [azp, access] of [[filesClient, { users: [{ email }] }], [client, { allowed: [email], admins: [email] }]]) {
+    const f = setup(t, { access });
+    const req = request(await token({ azp })); req.headers.delete('Origin');
+    assert.equal((await worker.fetch(req, f.env)).status, 403);
+    assert.equal(f.aiCalls().length, 0);
+  }
+});
+
+test('Caller cannot select Files policy through Origin or request body', async t => {
+  const f = setup(t, { denied: true });
+  const result = await worker.fetch(request(await token(), {
+    headers: { Origin: 'https://ah-files.pages.dev' }, body: { ...sample, clientId: filesClient },
+  }), f.env);
+  assert.equal(result.status, 403);
+  assert.match(decodeURIComponent(f.calls.find(call => call.url.pathname.includes('/root:/')).url.pathname), /AH Doc Renamer\/allowed-users.json/);
+  assert.equal(f.aiCalls().length, 0);
+});
+
+test('Files explicit admins allowed; empty/malformed lists and oskar-prefix lookalikes denied', async t => {
+  for (const options of [
+    { access: { admins: [email] }, expected: 200 },
+    { access: { admins: [], allowed: [] }, expected: 403 },
+    { access: { admins: 'everyone', allowed: [email] }, expected: 503 },
+    { access: { admins: [], allowed: 'everyone' }, expected: 503 },
+    { access: [], expected: 503 },
+    { access: {}, email: 'oskar@attacker.example', expected: 403 },
+    { access: {}, email: 'guest#EXT#@tenant.example', mail: 'oskar@auhs.com.au', userType: 'Guest', expected: 403 },
+    { access: { allowed: ['hello@vaef.app'] }, email: 'hello@vaef.app', expected: 403 },
+  ]) {
+    const f = setup(t, options);
+    const result = await worker.fetch(request(await token({ azp: filesClient })), f.env);
+    assert.equal(result.status, options.expected);
+    assert.equal(f.aiCalls().length, options.expected === 200 ? 1 : 0);
+  }
+});
+
+test('Files missing policy path, changed eTag, rejected OBO and removed client fail closed', async t => {
+  for (const options of [{ changedEtag: true }, { oboFail: true }]) {
+    const f = setup(t, { ...options, access: { allowed: [email] } });
+    assert.equal((await worker.fetch(request(await token({ azp: filesClient })), f.env)).status, 503);
+    assert.equal(f.aiCalls().length, 0);
+  }
+  const f = setup(t, { access: { allowed: [email] } });
+  assert.equal((await worker.fetch(request(await token({ azp: filesClient })), { ...f.env, AH_FILES_ACCESS_PATH: '' })).status, 503);
+  assert.equal((await worker.fetch(request(await token({ azp: filesClient })), { ...f.env, AH_FILES_CLIENT_ID: '' })).status, 401);
+  assert.equal((await worker.fetch(request(await token({ azp: filesClient, aud: filesClient })), f.env)).status, 401);
+  assert.equal(f.aiCalls().length, 0);
+});
+
+test('Additional CORS only permits exact Files production and local test origins', async t => {
+  const f = setup(t);
+  for (const allowed of ['https://ah-files.pages.dev', 'http://localhost:8137', origin]) {
+    const result = await worker.fetch(request(null, { method: 'OPTIONS', headers: { Origin: allowed } }), f.env);
+    assert.equal(result.status, 204); assert.equal(result.headers.get('Access-Control-Allow-Origin'), allowed);
+  }
+  for (const denied of ['https://evil.ah-files.pages.dev', 'https://ah-files.pages.dev.evil.example', 'http://localhost:9999']) {
+    assert.equal((await worker.fetch(request(null, { method: 'OPTIONS', headers: { Origin: denied } }), f.env)).status, 403);
+  }
+  assert.equal(f.calls.length, 0);
 });

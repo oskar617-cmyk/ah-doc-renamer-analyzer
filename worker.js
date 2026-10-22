@@ -51,7 +51,7 @@ const NONE = '__NONE__';       // sentinel the model returns when nothing fits
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin') || '';
-    const allowOrigin = pickAllowedOrigin(origin, env.CORS_ORIGINS);
+    const allowOrigin = pickAllowedOrigin(origin, [env.CORS_ORIGINS, env.ADDITIONAL_CORS_ORIGINS].filter(Boolean).join(','));
 
     if (new URL(request.url).pathname !== '/') return json({ error: 'Not found' }, 404, allowOrigin);
     if (origin && !allowOrigin) return json({ error: 'Origin not allowed' }, 403, '');
