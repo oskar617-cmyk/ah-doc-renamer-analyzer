@@ -35,7 +35,9 @@ export async function readJson(response, maxBytes, signal) {
 }
 
 export async function fetchJson(url, init, maxBytes, signal) {
-  const response = await fetch(url, { ...init, signal, redirect: 'error' });
+  // workerd does not implement redirect: 'error'. Manual mode plus the !ok
+  // check rejects every 3xx without forwarding credentials to its Location.
+  const response = await fetch(url, { ...init, signal, redirect: 'manual' });
   if (!response.ok) {
     response.body?.cancel().catch(() => {});
     throw new HttpError(503, 'Upstream service is unavailable');

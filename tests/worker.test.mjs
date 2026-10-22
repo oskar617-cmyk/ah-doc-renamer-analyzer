@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 import worker from '../worker.js';
-import { readJson } from '../security-http.js';
+import { readJson, fetchJson } from '../security-http.js';
 
 const endpoint = 'https://ah-doc-renamer-worker-analyzer.oskar617.workers.dev/';
 const origin = 'https://ah-doc-renamer.pages.dev';
@@ -55,7 +55,7 @@ function setup(t, options = {}) {
     if (url.hostname === 'graph.microsoft.com') {
       assert.equal(init.method || 'GET', 'GET');
       assert.equal(init.headers.Authorization, 'Bearer synthetic-graph-token');
-      assert.equal(init.redirect, 'error');
+      assert.equal(init.redirect, 'manual');
       if (url.pathname === '/v1.0/me') return Response.json({ id: options.wrongOid ? client : oid,
         userPrincipalName: options.email || email, mail: options.mail || email, userType: options.userType || 'Member' });
       if (options.graphFail) return Response.json({}, { status: 403 });
@@ -66,7 +66,7 @@ function setup(t, options = {}) {
     }
     if (url.hostname === 'auzziehomes.sharepoint.com') {
       assert.equal(init.headers, undefined, 'Graph bearer must not reach the download host');
-      assert.equal(init.redirect, 'error');
+      assert.equal(init.redirect, 'manual');
       return options.invalidList ? Response.json({ users: null }) : Response.json({ users: options.denied ? [] : [{ email }] });
     }
     assert.equal(url.hostname, 'generativelanguage.googleapis.com');
@@ -83,6 +83,22 @@ function request(bearer, { body = sample, method = 'POST', url = endpoint, heade
     'CF-Connecting-IP': '192.0.2.1', ...(bearer ? { Authorization: 'Bearer ' + bearer } : {}), ...headers },
     ...(method === 'POST' ? { body: typeof body === 'string' ? body : JSON.stringify(body) } : {}) });
 }
+
+test('Outbound fetch is workerd-compatible and rejects redirects without replay', async t => {
+  const previousFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = previousFetch; });
+  let calls = 0;
+  globalThis.fetch = async (_url, init) => {
+    calls++;
+    assert.equal(init.redirect, 'manual', 'workerd only accepts follow or manual');
+    return new Response(null, { status: 302, headers: { Location: 'https://evil.example' } });
+  };
+  await assert.rejects(fetchJson('https://graph.microsoft.com/v1.0/me', {
+    headers: { Authorization: 'Bearer synthetic-private-token' }, redirect: 'follow',
+  }, 1024, AbortSignal.timeout(1000)), error => error.status === 503 &&
+    !error.message.includes('synthetic-private-token'));
+  assert.equal(calls, 1, 'No redirect destination is fetched');
+});
 
 test('Health is free, uncached and matches deployment name', async t => {
   const f = setup(t);

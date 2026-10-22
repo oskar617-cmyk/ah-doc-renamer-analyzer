@@ -27,3 +27,4 @@
 - `worker.js` 路由/契约校验;`auth.js` JWT/OBO/准入/限流;`analyzer.js` 原 Gemini 提示词与结果转换;`security-http.js` 有界读取与 deadline。
 - 无 DB、无权限缓存、无持久文档；只读原 allowed-users.json，不创建文件夹，不实施真实重命名/归档，不整合 AH Files。
 - 只有固定 Microsoft / Graph / SharePoint / Gemini 出站目标；OBO 与 AI secret 分离，任何依赖出错均 fail closed，日志不打印业务数据与上游原始错误。
+- HTTP 跳转必须使用 `redirect: 'manual'` 并拒绝所有非 2xx；2026-10-22 真实 workerd 联调发现本项目运行时不支持 `redirect: 'error'`（Node 可用不代表 Worker 可用）。不可改为 follow，否则可能向 Location 转发凭据；回归覆盖单次请求/拒绝 302，发布验收包含原生 workerd 的真实 OBO。
