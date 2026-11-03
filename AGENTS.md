@@ -9,7 +9,7 @@
 2. 消费端 contract:ah-doc-renamer repo 的 `js/classify.js`
 
 ## 3. Current Snapshot
-`worker.js` 内 VERSION v0.08(原 Doc Renamer 与 AH Files 分别验签 client、独立准入文件;保留 delegated OBO 与限流)。模型 `gemini-3.1-flash-lite`不变;实际费用/额度取决于 key 所属账号。(替换制。)
+源码版本 v0.09：使用 Core SDK 1.4.0，统一原生模型协议；没有自动模型重试或付费备用。原有认证、数据隔离和业务保护保留。只用本地合成数据验证，验收范围见 docs/ai-routing-2026-11-03.md。
 
 ## 4. Hard Rules
 - **Contract 锁定于 PWA 的 `js/classify.js`:两边同步改**,单边改 = 破坏。
