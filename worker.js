@@ -37,8 +37,9 @@ import { classify, MODEL } from './analyzer.js';
 
 // Bump on every release. Reported by the GET health check, and used in the zip
 // filename — this is the Worker's equivalent of a PWA's service-worker VERSION.
-// v0.09: AH Files is a separate verified client with its own access policy.
-const VERSION = 'v0.08';
+// v0.08: AH Files is a separate verified client with its own access policy.
+// v0.09: Shared Core transport; no automatic inference retry or fallback.
+const VERSION = 'v0.09';
 
 const MAX_TEXT_CHARS = 6000;   // defensive cap (PWA already limits to ~6000)
 const MAX_NOTE_CHARS = 500;    // keep the draft note short
