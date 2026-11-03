@@ -78,7 +78,7 @@ function setup(t, options = {}) {
     assert.equal(init.headers['x-goog-api-key'], env.GEMINI_API_KEY);
     assert.equal(init.headers.Authorization, undefined, 'Microsoft bearer must not reach Gemini');
     if (options.aiFail) return new Response('synthetic-sensitive-error', { status: 500 });
-    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(ai) }] } }] });
+    return Response.json({ candidates: [{ finishReason:'STOP', content: { parts: [{ text: JSON.stringify(ai) }] } }] });
   };
   return { env, calls, limitKeys, aiCalls: () => calls.filter(c => c.url.hostname === 'generativelanguage.googleapis.com') };
 }

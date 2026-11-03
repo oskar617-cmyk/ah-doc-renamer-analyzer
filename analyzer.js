@@ -1,36 +1,15 @@
-import { fetchJson } from './security-http.js';
+import {createDirectClient} from './vendor/vaenyx/direct.mjs';
 
 export const MODEL = 'gemini-3.1-flash-lite';
 const NONE = '__NONE__';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 export async function classify({ apiKey, filename, text, image, candidates, examples = [] }) {
   const prompt = buildPrompt({ filename, text, candidates, examples });
   const schema = buildSchema(candidates);
 
-  const parts = [{ text: prompt }];
-  if (image) {
-    const img = parseDataUrl(image);
-    if (img) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
-  }
-
-  const reqBody = {
-    contents: [{ role: 'user', parts }],
-    generationConfig: {
-      temperature: 0,
-      responseMimeType: 'application/json',
-      responseSchema: schema,
-      maxOutputTokens: 8192,
-    },
-  };
-
-  const data = await fetchJson(GEMINI_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify(reqBody),
-  }, 1024 * 1024, AbortSignal.timeout(20000));
-  const out = extractText(data);
-  if (!out) throw new Error('Empty model output');
+  const img=image?parseDataUrl(image):null;
+  const result=await createDirectClient({provider:'gemini',apiKey,timeoutMs:20000}).run({model:MODEL,prompt,capability:'structured_output',requirements:{max_output_tokens:8192,schema}}, {attachments:img?[{name:'document.png',mime:img.mimeType,base64:img.data}]:[]});
+  const out=result.text;
 
   let parsed;
   try {
@@ -110,26 +89,16 @@ function buildSchema(candidates) {
   const docTypeEnum = candidates.map((c) => c.docType);
   docTypeEnum.push(NONE);
   return {
-    type: 'OBJECT',
+    type: 'object',
     properties: {
-      docType: { type: 'STRING', enum: docTypeEnum },
-      confidence: { type: 'STRING', enum: ['high', 'medium', 'low'] },
-      note: { type: 'STRING' },
-      detectedAddress: { type: 'STRING' },
-      detectedJobCode: { type: 'STRING' },
+      docType: { type: 'string', enum: docTypeEnum },
+      confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+      note: { type: 'string' },
+      detectedAddress: { type: 'string' },
+      detectedJobCode: { type: 'string' },
     },
     required: ['docType', 'confidence', 'note', 'detectedAddress', 'detectedJobCode'],
   };
-}
-
-function extractText(data) {
-  try {
-    const parts = data.candidates?.[0]?.content?.parts;
-    if (!Array.isArray(parts)) return '';
-    return parts.map((p) => (typeof p.text === 'string' ? p.text : '')).join('').trim();
-  } catch {
-    return '';
-  }
 }
 
 function parseDataUrl(dataUrl) {
